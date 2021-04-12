@@ -7,6 +7,8 @@ import (
 	"github.com/ulikunitz/xz"
 	"gopkg.in/yaml.v3"
 	"io"
+	"repodata/db"
+	"strconv"
 
 	"encoding/json"
 	"encoding/xml"
@@ -14,10 +16,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	_ "repodata/db"
 	"repodata/repodata"
 	"strings"
-
-	bolt "go.etcd.io/bbolt"
 )
 
 func Unwrap(err error) {
@@ -142,15 +143,8 @@ func (ctx Syncer) SyncModules(md repodata.RepoMD, h handler) error {
 	return nil
 }
 
-type handler struct{}
-
-func (h handler) Updateinfo(updateinfo repodata.Updateinfo, ctx Syncer) error {
-	return nil
-}
-
-func (h handler) ModuleItem(m repodata.ModuleItem, ctx Syncer) error {
-	fmt.Printf("Module item %+v", m)
-	return nil
+type handler struct {
+	repo db.Repo
 }
 
 func (h handler) Metadata(md repodata.RepoMD, ctx Syncer) error {
@@ -170,7 +164,30 @@ func (h handler) Metadata(md repodata.RepoMD, ctx Syncer) error {
 }
 
 func (h handler) Primary(primary repodata.Primary, ctx Syncer) error {
+	names := []string{}
+	evrs := map[db.EvrData]bool{}
+
+	for _, p := range primary.Package {
+		names = append(names, p.Name)
+		epoch, _ := strconv.Atoi(p.Version.Epoch)
+		evrs[db.EvrData{
+			Epoch:   epoch,
+			Version: p.Version.Ver,
+			Release: p.Version.Rel,
+		}] = true
+	}
+	var nameArr []db.PackageName
+	db.DB.Find(&nameArr, "name in (?)", names)
+
 	println("primary done")
+	return nil
+}
+func (h handler) Updateinfo(updateinfo repodata.Updateinfo, ctx Syncer) error {
+	return nil
+}
+
+func (h handler) ModuleItem(m repodata.ModuleItem, ctx Syncer) error {
+	fmt.Printf("Module item %+v", m)
 	return nil
 }
 
@@ -181,21 +198,17 @@ func main() {
 	Unwrap(json.Unmarshal(repo, &repolist))
 	fmt.Printf("%+v\n", repolist)
 
-	repos := repodata.GetUrls(repolist)
-	for _, urls := range repos {
-		for _, url := range urls {
-			ctx := NewSyncer(url)
-			err = ctx.SyncMetadata(handler{})
-			if err != nil {
-				fmt.Printf("Error occured: %v \n", err)
-			}
+	repodata.SyncRepolist(repolist)
+
+	var repos []db.Repo
+	db.DB.Find(&repos)
+	for _, repo := range repos {
+		ctx := NewSyncer(repo.Url)
+		err = ctx.SyncMetadata(handler{repo})
+		if err != nil {
+			fmt.Printf("Error occured: %v \n", err)
+
 		}
 	}
-
-	db, err := bolt.Open("data.bolt", 0600, nil)
-
-	Unwrap(err)
-
-	defer db.Close()
 
 }

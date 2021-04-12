@@ -2,6 +2,7 @@ package repodata
 
 import (
 	"encoding/json"
+	"repodata/db"
 	"strings"
 )
 
@@ -42,8 +43,7 @@ type RepoEntry struct {
 
 type Repolist []RepoEntry
 
-func GetUrls(repolist Repolist) map[string][]string {
-	repos := map[string][]string{}
+func SyncRepolist(repolist Repolist) {
 
 	for _, r := range repolist {
 		for _, prod := range r.Products {
@@ -66,9 +66,20 @@ func GetUrls(repolist Repolist) map[string][]string {
 						urls = append(urls, url)
 					}
 				}
-				repos[label] = urls
+				var set db.ContentSet
+				db.DB.First(&set, "label = ? ", label)
+				set.Label = label
+				set.Name = cset.Name
+				db.DB.Save(&set)
+
+				for _, url := range urls {
+					var repo db.Repo
+					db.DB.First(&repo, "url = ? AND content_set_id = ?", url, set.ID)
+					repo.Url = url
+					repo.Revision = 0
+					db.DB.Save(&repo)
+				}
 			}
 		}
 	}
-	return repos
 }
